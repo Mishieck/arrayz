@@ -1,6 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
+const math = std.math;
 
 pub fn Array(comptime element: type) type {
     return struct {
@@ -64,6 +65,12 @@ pub fn Array(comptime element: type) type {
             return slice[0..i];
         }
 
+        /// Inserts `value` into `slice` at `index`. `length` is the length of the sub-slice of
+        /// `slice` that has defined values. All values beyond the sub-slice are undefined.
+        pub fn insert(slice: Slice, length: usize, index: usize, value: ConstSlice) Slice {
+            return splice(slice, length, index, 0, value);
+        }
+
         /// Replaces a slice at `index` with length `remove_count` by `replacement` in `slice`.
         /// Values from the start of `slice` to `length` are considered to be set. All values
         /// beyond `length` are considered undefined. The condition
@@ -75,8 +82,8 @@ pub fn Array(comptime element: type) type {
         /// must be satisfied. Otherwise, `slice` will overflow.
         pub fn splice(
             slice: Slice,
-            index: usize,
             length: usize,
+            index: usize,
             remove_count: usize,
             replacement: ConstSlice,
         ) Slice {
@@ -91,6 +98,41 @@ pub fn Array(comptime element: type) type {
                 index,
                 replacement,
             );
+        }
+
+        /// Rotates `slice` by `steps` towards the start.
+        pub fn rotateStart(slice: Slice, steps: usize) Slice {
+            const i_steps: isize = @bitCast(steps);
+            return rotate(slice, -i_steps);
+        }
+
+        /// Rotates `slice` by `steps` towards the end.
+        pub fn rotateEnd(slice: Slice, steps: usize) Slice {
+            return rotate(slice, @bitCast(steps));
+        }
+
+        /// Rotates `slice` by `steps`. When `steps` is negative, it rotates towards the start.
+        /// Otherwise, it rotates towards the end.
+        pub fn rotate(slice: Slice, steps: isize) Slice {
+            if (slice.len == 0) return slice;
+            const sign: isize = math.sign(steps);
+            const steps_abs = @abs(steps);
+
+            for (0..steps_abs) |_| {
+                var index: isize = 0;
+                var current = slice[@bitCast(index)];
+
+                for (0..slice.len) |_| {
+                    const i_slice_len: isize = @bitCast(slice.len);
+                    const next_index = @mod(index +% sign, i_slice_len);
+                    const next = slice[@bitCast(next_index)];
+                    slice[@bitCast(next_index)] = current;
+                    current = next;
+                    index = next_index;
+                }
+            }
+
+            return slice;
         }
 
         /// Shifts values in a `slice` by `steps` to the left or right. If `steps < 0` values are
@@ -138,6 +180,24 @@ pub fn Array(comptime element: type) type {
             const Slide = *const fn (slice: Slice, index: usize, length: usize, steps: usize) Slice;
             const s: Slide = if (steps < 0) slideLeft else slideRight;
             return s(slice, index, length, @abs(steps));
+        }
+
+        pub fn slideOnce(slice: Slice, index: usize, length: usize, direction: isize) Slice {
+            if (slice.len == 0 or length == 0) return slice;
+
+            const end: isize = @bitCast(index + length);
+            var current_index: isize = if (direction == -1) end - 1 else @bitCast(index);
+            var current = slice[@bitCast(current_index)];
+
+            for (0..length) |_| {
+                const next_index = current_index + direction;
+                const next = slice[@bitCast(next_index)];
+                slice[@bitCast(next_index)] = current;
+                current = next;
+                current_index = next_index;
+            }
+
+            return slice;
         }
 
         /// Slides a slice withing another `slice` to the left. The inner slice starts at `index`
@@ -295,6 +355,16 @@ test "slideRight" {
     try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slideRight(&slice, 1, 2, 3)[4..6]);
 }
 
+test "slideOnce" {
+    const Arr = Array(u8);
+    var slice = Arr.init(5);
+
+    @memcpy(&slice, &[_]Arr.Element{ 0, 0, 1, 2, 0 });
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2 }, Arr.slideOnce(&slice, 2, 2, -1)[0..3]);
+    try testing.expectEqualSlices(u8, &.{ 1, 2 }, Arr.slideOnce(&slice, 1, 2, -1)[0..2]);
+    try testing.expectEqualSlices(u8, &.{ 1, 2 }, Arr.slideOnce(&slice, 0, 2, 1)[1..3]);
+}
+
 test "slide" {
     const Arr = Array(u8);
     var slice = Arr.init(8);
@@ -320,6 +390,36 @@ test "shiftRight" {
     var slice = Arr.init(4);
     @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
     try testing.expectEqualSlices(u8, &.{ 0, 1, 2 }, Arr.shiftRight(&slice, 1)[1..4]);
+}
+
+test "rotate" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+
+    try testing.expectEqualSlices(u8, &.{ 3, 0, 1, 2 }, Arr.rotate(&slice, 1));
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 0 }, Arr.rotate(&slice, 2));
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3 }, Arr.rotate(&slice, 1));
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3 }, Arr.rotate(&slice, 4));
+    try testing.expectEqualSlices(u8, &.{ 3, 0, 1, 2 }, Arr.rotate(&slice, 5));
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2, 3 }, Arr.rotate(&slice, -5));
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 0 }, Arr.rotate(&slice, -1));
+}
+
+test "rotateStart" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+
+    try testing.expectEqualSlices(u8, &.{ 3, 0, 1, 2 }, Arr.rotateStart(&slice, 3));
+}
+
+test "rotateEnd" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3, 0 }, Arr.rotateEnd(&slice, 3));
 }
 
 test "shift" {
@@ -383,6 +483,13 @@ test "pad" {
     try testing.expectEqualSlices(u8, &.{ 0, 0, 1, 2, 0 }, Arr.pad(slice[0..5], 0, &.{ 1, 2 }));
 }
 
+test "insert" {
+    const Arr = Array(u8);
+    var slice = Arr.init(5);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 0, 1, 0, 0 });
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2, 0, 1 }, Arr.insert(&slice, 3, 1, &.{ 1, 2 }));
+}
+
 test "splice" {
     const Arr = Array(u8);
     var slice = Arr.init(8);
@@ -391,30 +498,30 @@ test "splice" {
     try testing.expectEqualSlices(
         u8,
         &.{ 0, 1, 2, 1, 0 },
-        Arr.splice(&slice, 3, 5, 0, &.{ 1, 0 })[0..5],
+        Arr.splice(&slice, 5, 3, 0, &.{ 1, 0 })[0..5],
     );
 
     try testing.expectEqualSlices(
         u8,
         &.{ 1, 2, 4, 1, 0 },
-        Arr.splice(&slice, 0, 5, 3, &.{ 1, 2, 4 })[0..5],
+        Arr.splice(&slice, 5, 0, 3, &.{ 1, 2, 4 })[0..5],
     );
 
     try testing.expectEqualSlices(
         u8,
         &.{ 1, 2, 4, 8, 16 },
-        Arr.splice(&slice, 3, 6, 3, &.{ 8, 16 })[0..5],
+        Arr.splice(&slice, 6, 3, 3, &.{ 8, 16 })[0..5],
     );
 
     try testing.expectEqualSlices(
         u8,
         &.{ 1, 4, 16 },
-        Arr.splice(&slice, 1, 5, 3, &.{4})[0..3],
+        Arr.splice(&slice, 5, 1, 3, &.{4})[0..3],
     );
 
     try testing.expectEqualSlices(
         u8,
         &.{ 1, 16 },
-        Arr.splice(&slice, 1, 3, 1, &.{})[0..2],
+        Arr.splice(&slice, 3, 1, 1, &.{})[0..2],
     );
 }
