@@ -2,6 +2,7 @@ const std = @import("std");
 const testing = std.testing;
 const mem = std.mem;
 const math = std.math;
+const debug = std.debug;
 
 pub fn Array(comptime element: type) type {
     return struct {
@@ -135,54 +136,69 @@ pub fn Array(comptime element: type) type {
             return slice;
         }
 
-        /// Shifts values in a `slice` by `steps` to the left or right. If `steps < 0` values are
-        /// shifted to the left. Otherwise, values are shifted to the right.
-        pub fn shift(slice: Slice, steps: isize) Slice {
-            const Shift = fn (slice: Slice, steps: usize) Slice;
-            const sh: *const Shift = if (steps < 0) shiftLeft else shiftRight;
-            return sh(slice, @abs(steps));
-        }
-
         /// Shifts values in a `slice` by `steps` to the left.
-        pub fn shiftLeft(slice: Slice, steps: usize) Slice {
-            var start: usize = 1;
-            var end: usize = slice.len;
-
-            for (0..steps) |_| {
-                var i: usize = start;
-                while (i < end) : (i += 1) slice[i - 1] = slice[i];
-                start = @max(start - 1, 1);
-                end -= 1;
-            }
-
-            return slice;
+        pub fn shiftStart(slice: Slice, steps: usize) Slice {
+            const i_steps: isize = @bitCast(steps);
+            return shift(slice, -i_steps);
         }
 
         /// Shifts values in a `slice` by `steps` to the right.
-        pub fn shiftRight(slice: Slice, steps: usize) Slice {
-            var start: usize = 0;
-            var end: usize = slice.len - 1;
+        pub fn shiftEnd(slice: Slice, steps: usize) Slice {
+            return shift(slice, @bitCast(steps));
+        }
 
-            for (0..steps) |_| {
-                var i: usize = end;
-                while (i > start) : (i -= 1) slice[i] = slice[i - 1];
-                start += 1;
-                end = @min(end + 1, slice.len);
+        /// Shifts values in a `slice` by `steps` to the left or right. If `steps < 0` values are
+        /// shifted to the left. Otherwise, values are shifted to the right.
+        pub fn shift(slice: Slice, steps: isize) Slice {
+            const direction = math.sign(steps);
+            var length: isize = @bitCast(slice.len);
+            var current_index: isize = if (direction == -1) 1 else 0;
+
+            for (0..@abs(steps)) |_| {
+                _ = slideOnce(slice, @bitCast(current_index), @bitCast(length - 1), direction);
+                current_index = @max(current_index + direction, 1);
+                length -= 1;
             }
 
             return slice;
+        }
+
+        /// Slides a slice withing another `slice` to the left. The inner slice starts at `index`
+        /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
+        pub fn slideStart(slice: Slice, index: usize, length: usize, steps: usize) Slice {
+            const i_steps: isize = @bitCast(steps);
+            return slide(slice, index, length, -i_steps);
+        }
+
+        /// Slides a slice withing another `slice` to the right. The inner slice starts at `index`
+        /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
+        pub fn slideEnd(slice: Slice, index: usize, length: usize, steps: usize) Slice {
+            return slide(slice, index, length, @bitCast(steps));
         }
 
         /// Slides a slice withing another `slice`. The inner slice starts at `index` and has
         /// length `length`. The inner slice is slid by `steps`. If `steps < 0` the inner slice is
         /// slid left, otherwise, it is slid right. The base slice is returned.
         pub fn slide(slice: Slice, index: usize, length: usize, steps: isize) Slice {
-            const Slide = *const fn (slice: Slice, index: usize, length: usize, steps: usize) Slice;
-            const s: Slide = if (steps < 0) slideLeft else slideRight;
-            return s(slice, index, length, @abs(steps));
+            const direction = math.sign(steps);
+            var current_index: isize = @bitCast(index);
+
+            for (0..@abs(steps)) |_| {
+                _ = slideOnce(slice, @bitCast(current_index), length, direction);
+                current_index += direction;
+            }
+
+            return slice;
         }
 
+        /// Slides a sub-slice at `index` of length `length` in `slice` at most once. If
+        ///
+        /// - `direction == -1`: it is going to slide towards the start.
+        /// - `direction == 0`: it will not slide.
+        /// - `direction == 1`: it will slide towards the end.
+        /// - Otherwise: a panic is going to be triggered.
         pub fn slideOnce(slice: Slice, index: usize, length: usize, direction: isize) Slice {
+            debug.assert(direction >= -1 and direction <= 1);
             if (slice.len == 0 or length == 0) return slice;
 
             const end: isize = @bitCast(index + length);
@@ -195,38 +211,6 @@ pub fn Array(comptime element: type) type {
                 slice[@bitCast(next_index)] = current;
                 current = next;
                 current_index = next_index;
-            }
-
-            return slice;
-        }
-
-        /// Slides a slice withing another `slice` to the left. The inner slice starts at `index`
-        /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
-        pub fn slideLeft(slice: Slice, index: usize, length: usize, steps: usize) Slice {
-            var start: usize = index;
-            var end: usize = index + length;
-
-            for (0..steps) |_| {
-                var i: usize = start;
-                while (i < end) : (i += 1) slice[i - 1] = slice[i];
-                start -= 1;
-                end -= 1;
-            }
-
-            return slice;
-        }
-
-        /// Slides a slice withing another `slice` to the right. The inner slice starts at `index`
-        /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
-        pub fn slideRight(slice: Slice, index: usize, length: usize, steps: usize) Slice {
-            var start: usize = index;
-            var end: usize = index + length;
-
-            for (0..steps) |_| {
-                var i: usize = end;
-                while (i > start) : (i -= 1) slice[i] = slice[i - 1];
-                start += 1;
-                end += 1;
             }
 
             return slice;
@@ -335,24 +319,24 @@ test "join" {
     );
 }
 
-test "slideLeft" {
+test "slideStart" {
     const Arr = Array(u8);
     var slice = Arr.init(8);
 
     slice[2] = 2;
     slice[3] = 4;
 
-    try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slideLeft(&slice, 2, 2, 2)[0..2]);
+    try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slideStart(&slice, 2, 2, 2)[0..2]);
 }
 
-test "slideRight" {
+test "slideEnd" {
     const Arr = Array(u8);
     var slice = Arr.init(8);
 
     slice[1] = 2;
     slice[2] = 4;
 
-    try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slideRight(&slice, 1, 2, 3)[4..6]);
+    try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slideEnd(&slice, 1, 2, 3)[4..6]);
 }
 
 test "slideOnce" {
@@ -378,18 +362,18 @@ test "slide" {
     try testing.expectEqualSlices(u8, &.{ 2, 4 }, Arr.slide(&slice, 2, 2, -2)[0..2]);
 }
 
-test "shiftLeft" {
+test "shiftStart" {
     const Arr = Array(u8);
     var slice = Arr.init(4);
     @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
-    try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, Arr.shiftLeft(&slice, 1)[0..3]);
+    try testing.expectEqualSlices(u8, &.{ 1, 2, 3 }, Arr.shiftStart(&slice, 1)[0..3]);
 }
 
-test "shiftRight" {
+test "shiftEnd" {
     const Arr = Array(u8);
     var slice = Arr.init(4);
     @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
-    try testing.expectEqualSlices(u8, &.{ 0, 1, 2 }, Arr.shiftRight(&slice, 1)[1..4]);
+    try testing.expectEqualSlices(u8, &.{ 0, 1, 2 }, Arr.shiftEnd(&slice, 1)[1..4]);
 }
 
 test "rotate" {
