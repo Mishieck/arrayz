@@ -163,6 +163,42 @@ pub fn Array(comptime element: type) type {
             return slice;
         }
 
+        /// Reverses `slice`.
+        pub fn reverse(slice: Slice) Slice {
+            mem.reverse(Element, slice);
+            return slice;
+        }
+
+        /// Swaps element at `first` with element at `second` in `slice`.
+        pub fn swap(slice: Slice, first: usize, second: usize) Slice {
+            mem.swap(Element, &slice[first], &slice[second]);
+            return slice;
+        }
+
+        /// Maps each element of `slice` using `f`.
+        pub fn map(slice: Slice, f: Map) Slice {
+            for (slice, 0..) |value, i| slice[i] = f(value, i, slice);
+            return slice;
+        }
+
+        pub const Map = fn (value: Element, index: usize, slice: ConstSlice) Element;
+
+        /// Filters elements from `slice` using the predicate `f`. The returned slice contains only
+        /// the filtered elements.
+        pub fn filter(slice: Slice, f: Predicate) Slice {
+            var i: usize = 0;
+
+            for (slice) |value| {
+                if (!f(value, i, slice)) continue;
+                slice[i] = value;
+                i += 1;
+            }
+
+            return slice[0..i];
+        }
+
+        pub const Predicate = fn (value: Element, index: usize, slice: ConstSlice) bool;
+
         /// Slides a slice withing another `slice` to the left. The inner slice starts at `index`
         /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
         pub fn slideStart(slice: Slice, index: usize, length: usize, steps: usize) Slice {
@@ -317,6 +353,48 @@ test "join" {
         &.{ 0, 1, 2, 3, 4, 5 },
         Arr.join(&slice, slice1, &.{ slice0, slice2 }),
     );
+}
+
+test "reverse" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+    try testing.expectEqualSlices(u8, &.{ 3, 2, 1, 0 }, Arr.reverse(&slice));
+}
+
+test "map" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+    try testing.expectEqualSlices(u8, &.{ 0, 2, 4, 6 }, Arr.map(&slice, double));
+}
+
+fn double(value: u8, index: usize, slice: []const u8) u8 {
+    _ = index;
+    _ = slice;
+    return value * 2;
+}
+
+test "filter" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+    try testing.expectEqualSlices(u8, &.{ 0, 2 }, Arr.filter(&slice, isEven));
+}
+
+fn isEven(value: u8, index: usize, slice: []const u8) bool {
+    _ = index;
+    _ = slice;
+    return value % 2 == 0;
+}
+
+test "swap" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 1, 2, 3 });
+
+    try testing.expectEqualSlices(u8, &.{ 0, 2, 1, 3 }, Arr.swap(&slice, 1, 2));
+    try testing.expectEqualSlices(u8, &.{ 3, 2, 1, 0 }, Arr.swap(&slice, 0, 3));
 }
 
 test "slideStart" {
