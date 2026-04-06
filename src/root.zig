@@ -9,6 +9,8 @@ pub fn Array(comptime element: type) type {
         const Element = element;
         pub const Slice = []Element;
         pub const ConstSlice = []const Element;
+        pub const Predicate = fn (value: Element, index: usize, slice: ConstSlice) bool;
+        pub const Map = fn (value: Element, index: usize, slice: ConstSlice) Element;
 
         /// Creates an array with the given `capacity`.
         pub inline fn init(comptime capacity: usize) [capacity]Element {
@@ -181,8 +183,6 @@ pub fn Array(comptime element: type) type {
             return slice;
         }
 
-        pub const Map = fn (value: Element, index: usize, slice: ConstSlice) Element;
-
         /// Filters elements from `slice` using the predicate `f`. The returned slice contains only
         /// the filtered elements.
         pub fn filter(slice: Slice, f: Predicate) Slice {
@@ -197,7 +197,52 @@ pub fn Array(comptime element: type) type {
             return slice[0..i];
         }
 
-        pub const Predicate = fn (value: Element, index: usize, slice: ConstSlice) bool;
+        /// Checks that all values in `slice` statisfy a condition defined by `f`.
+        pub fn forAll(slice: ConstSlice, f: Predicate) bool {
+            return for (slice, 0..) |value, i| {
+                if (f(value, i, slice)) continue else break false;
+            } else true;
+        }
+
+        /// Checks that there is a value in `slice` that statisfies a condition defined by `f`.
+        pub fn thereExists(slice: ConstSlice, f: Predicate) bool {
+            return for (slice, 0..) |value, i| {
+                if (f(value, i, slice)) break true;
+            } else false;
+        }
+
+        /// Finds a value in `slice` that statisfies a condition defined by `f`.
+        pub fn find(slice: ConstSlice, f: Predicate) ?Element {
+            return for (slice, 0..) |value, i| {
+                if (f(value, i, slice)) break value;
+            } else null;
+        }
+
+        /// Finds the index of `value` in `slice`.
+        pub fn indexOf(slice: ConstSlice, value: Element) ?usize {
+            return mem.indexOf(Element, slice, &.{value});
+        }
+
+        /// Finds the last index of `value` in `slice`.
+        pub fn lastIndexOf(slice: ConstSlice, value: Element) ?usize {
+            return mem.lastIndexOf(Element, slice, &.{value});
+        }
+
+        /// Finds the last index of `value` in `slice`.
+        pub fn findIndexOf(slice: ConstSlice, f: Predicate) ?usize {
+            return for (slice, 0..) |value, i| {
+                if (f(value, i, slice)) return i;
+            } else null;
+        }
+
+        /// Finds the last index of `value` in `slice`.
+        pub fn findLastIndexOf(slice: ConstSlice, f: Predicate) ?usize {
+            var last_index: ?usize = null;
+            for (slice, 0..) |value, i| {
+                if (f(value, i, slice)) last_index = i;
+            }
+            return last_index;
+        }
 
         /// Slides a slice withing another `slice` to the left. The inner slice starts at `index`
         /// and has length `length`. The inner slice is slid by `steps`. The base slice is returned.
@@ -382,10 +427,81 @@ test "filter" {
     try testing.expectEqualSlices(u8, &.{ 0, 2 }, Arr.filter(&slice, isEven));
 }
 
+test "forAll" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 0, 2, 4, 6 });
+    try testing.expectEqual(true, Arr.forAll(&slice, isEven));
+    try testing.expectEqual(false, Arr.forAll(&slice, isOdd));
+}
+
+test "thereExists" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 3, 1 });
+    try testing.expectEqual(true, Arr.thereExists(&slice, isEven));
+    @memcpy(&slice, &[_]Arr.Element{ 1, 3, 5, 7 });
+    try testing.expectEqual(false, Arr.thereExists(&slice, isEven));
+}
+
+test "find" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 3, 1 });
+    try testing.expectEqual(2, Arr.find(&slice, isEven).?);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 3, 5, 7 });
+    try testing.expectEqual(null, Arr.find(&slice, isEven));
+}
+
+test "indexOf" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 3, 1 });
+    try testing.expectEqual(1, Arr.indexOf(&slice, 2).?);
+    try testing.expectEqual(null, Arr.indexOf(&slice, 4));
+}
+
+test "lastIndexOf" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 3, 1 });
+    try testing.expectEqual(3, Arr.lastIndexOf(&slice, 1).?);
+    try testing.expectEqual(1, Arr.lastIndexOf(&slice, 2).?);
+    try testing.expectEqual(null, Arr.lastIndexOf(&slice, 4));
+}
+
+test "findIndexOf" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 3, 1 });
+    try testing.expectEqual(1, Arr.findIndexOf(&slice, isEven).?);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 3, 5, 7 });
+    try testing.expectEqual(null, Arr.findIndexOf(&slice, isEven));
+}
+
+test "findLastIndexOf" {
+    const Arr = Array(u8);
+    var slice = Arr.init(4);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 2, 2, 1 });
+    try testing.expectEqual(2, Arr.findLastIndexOf(&slice, isEven).?);
+    try testing.expectEqual(3, Arr.findLastIndexOf(&slice, isOdd).?);
+    @memcpy(&slice, &[_]Arr.Element{ 1, 3, 5, 7 });
+    try testing.expectEqual(null, Arr.findLastIndexOf(&slice, isEven));
+}
+
 fn isEven(value: u8, index: usize, slice: []const u8) bool {
+    return isParity(0, value, index, slice);
+}
+
+fn isOdd(value: u8, index: usize, slice: []const u8) bool {
+    return isParity(1, value, index, slice);
+}
+
+/// Checks if `value` has parity defined by `parity`. `0` is even and `1` is odd.
+fn isParity(parity: u1, value: u8, index: usize, slice: []const u8) bool {
     _ = index;
     _ = slice;
-    return value % 2 == 0;
+    return value % 2 == parity;
 }
 
 test "swap" {
