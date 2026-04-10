@@ -40,7 +40,7 @@ zig fetch --save git+https://github.com/mishieck/arrayz
 Add the following code snippet to your `build.zig` file.
 
 ```zig
-const tft = b.dependency("arrayz", .{
+const arrayz = b.dependency("arrayz", .{
     .target = target,
     .optimize = optimize,
 });
